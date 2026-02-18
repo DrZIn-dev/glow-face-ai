@@ -5,6 +5,8 @@ GlowFace AI is a React + Vite web app for experimenting with real-time face glow
 ## Features
 
 - Real-time camera preview with glow-style face effects
+- Optional MediaPipe hand landmark overlay (up to 2 hands)
+- Stage-based loading UI with loading percent during camera/model initialization
 - Filter presets and slider-based adjustments
 - Capture and download processed snapshots
 - Lightweight TypeScript + React codebase
@@ -31,6 +33,8 @@ pnpm dev
 
 Open the local URL shown in terminal (usually `http://localhost:5173`) and allow camera access.
 
+Note: the app loads MediaPipe scripts from jsDelivr CDN at runtime, so internet access is required.
+
 ## Scripts
 
 ```bash
@@ -48,8 +52,10 @@ pnpm preview  # preview production build locally
 ## Manual QA checklist
 
 - Camera permission prompt and denied state
+- Staged loading UI displays stage text and loading percent
 - Filter preset switching
 - Slider updates and reset behavior
+- Hand toggle and hand landmark overlay visibility
 - Capture + download flow
 - Browser check in Chrome + one additional browser
 

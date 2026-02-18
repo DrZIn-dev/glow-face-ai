@@ -4,14 +4,61 @@ import { Download, RefreshCw, X, Grid, Sliders } from 'lucide-react';
 
 const loadScript = (src) => {
   return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === 'true') {
+        resolve();
+        return;
+      }
+      const handleLoad = () => {
+        existing.dataset.loaded = 'true';
+        existing.removeEventListener('load', handleLoad);
+        existing.removeEventListener('error', handleError);
+        resolve();
+      };
+      const handleError = () => {
+        existing.removeEventListener('load', handleLoad);
+        existing.removeEventListener('error', handleError);
+        reject(new Error(`loadScript failed: ${src}`));
+      };
+      existing.addEventListener('load', handleLoad);
+      existing.addEventListener('error', handleError);
+      return;
+    }
     const script = document.createElement('script');
     script.src = src;
     script.async = true;
-    script.onload = resolve;
-    script.onerror = reject;
+    script.onload = () => {
+      script.dataset.loaded = 'true';
+      resolve();
+    };
+    script.onerror = () => reject(new Error(`loadScript failed: ${src}`));
     document.body.appendChild(script);
   });
+};
+
+const HAND_CONNECTIONS = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17],
+];
+
+const MEDIAPIPE_FACE_MESH_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/';
+const MEDIAPIPE_HANDS_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/';
+
+const resolveMediaPipeAsset = (file) => {
+  if (file.startsWith('hands_')) return `${MEDIAPIPE_HANDS_BASE}${file}`;
+  if (file.startsWith('face_mesh_')) return `${MEDIAPIPE_FACE_MESH_BASE}${file}`;
+  return `${MEDIAPIPE_FACE_MESH_BASE}${file}`;
+};
+
+const resolveHandsAsset = (file) => {
+  if (file.startsWith('face_mesh_')) return `${MEDIAPIPE_FACE_MESH_BASE}${file}`;
+  if (file.startsWith('hands_')) return `${MEDIAPIPE_HANDS_BASE}${file}`;
+  return `${MEDIAPIPE_HANDS_BASE}${file}`;
 };
 
 const FILTER_PRESETS = [
@@ -56,6 +103,38 @@ const buildInitialConfigs = () => {
   return out;
 };
 
+const drawHandOverlay = (ctx, handResults, width, height) => {
+  if (!handResults?.multiHandLandmarks?.length) return;
+
+  handResults.multiHandLandmarks.forEach((landmarks, handIdx) => {
+    const handedness = handResults.multiHandedness?.[handIdx]?.label;
+    const color = handedness === 'Left' ? 'rgba(251,113,133,0.95)' : 'rgba(34,211,238,0.95)';
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+
+    HAND_CONNECTIONS.forEach(([start, end]) => {
+      const p1 = landmarks[start];
+      const p2 = landmarks[end];
+      if (!p1 || !p2) return;
+      ctx.beginPath();
+      ctx.moveTo(p1.x * width, p1.y * height);
+      ctx.lineTo(p2.x * width, p2.y * height);
+      ctx.stroke();
+    });
+
+    ctx.fillStyle = '#ffffff';
+    landmarks.forEach((point) => {
+      ctx.beginPath();
+      ctx.arc(point.x * width, point.y * height, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.restore();
+  });
+};
+
 export default function App() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -66,21 +145,36 @@ export default function App() {
   const [capturedImage, setCapturedImage] = useState(null);
   const [isFilterEnabled, setIsFilterEnabled] = useState(true);
   const [isMeshEnabled, setIsMeshEnabled] = useState(false);
+  const [isHandEnabled, setIsHandEnabled] = useState(false);
+  const [handWarning, setHandWarning] = useState(null);
   const [selectedFilterId, setSelectedFilterId] = useState('natural');
   const [showAdjustPanel, setShowAdjustPanel] = useState(false);
   const [filterConfigs, setFilterConfigs] = useState(buildInitialConfigs);
   const [jsonInput, setJsonInput] = useState('');
   const [jsonStatus, setJsonStatus] = useState({ type: null, message: '' });
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingStage, setLoadingStage] = useState('เริ่มต้นระบบ...');
 
   const isFilterEnabledRef = useRef(true);
   const isMeshEnabledRef = useRef(false);
+  const isHandEnabledRef = useRef(false);
+  const handModelReadyRef = useRef(false);
+  const latestHandsRef = useRef({ multiHandLandmarks: [], multiHandedness: [] });
   const selectedFilterIdRef = useRef('natural');
   const filterConfigsRef = useRef(filterConfigs);
 
   useEffect(() => { isFilterEnabledRef.current = isFilterEnabled; }, [isFilterEnabled]);
   useEffect(() => { isMeshEnabledRef.current = isMeshEnabled; }, [isMeshEnabled]);
+  useEffect(() => { isHandEnabledRef.current = isHandEnabled; }, [isHandEnabled]);
   useEffect(() => { selectedFilterIdRef.current = selectedFilterId; }, [selectedFilterId]);
   useEffect(() => { filterConfigsRef.current = filterConfigs; }, [filterConfigs]);
+
+  const setInitProgress = useCallback((nextProgress, stageText) => {
+    const clamped = Math.max(0, Math.min(100, nextProgress));
+    setLoadingProgress(prev => Math.max(prev, clamped));
+    if (stageText) setLoadingStage(stageText);
+  }, []);
 
   const handleConfigChange = useCallback((filterId, key, val) => {
     setFilterConfigs(prev => ({ ...prev, [filterId]: { ...prev[filterId], [key]: val } }));
@@ -153,7 +247,8 @@ export default function App() {
 
   const getExpandedOvalPoints = (landmarks, indices, width, height, scale, foreheadScale) => {
     const points = indices.map(i => ({ x: landmarks[i].x * width, y: landmarks[i].y * height }));
-    let sumX = 0, sumY = 0;
+    let sumX = 0;
+    let sumY = 0;
     points.forEach(p => { sumX += p.x; sumY += p.y; });
     const cx = sumX / points.length;
     const cy = sumY / points.length;
@@ -167,26 +262,45 @@ export default function App() {
   useEffect(() => {
     let camera = null;
     let faceMesh = null;
+    let hands = null;
     let isUnmounted = false;
     const faceOvalIndices = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
 
     const init = async () => {
       try {
-        // Step 1: ทดสอบกล้องก่อน
+        if (!isUnmounted) {
+          setCameraError(null);
+          setIsInitializing(true);
+          setInitProgress(0, 'เริ่มต้นระบบ...');
+          setHandWarning(null);
+        }
+
+        setInitProgress(10, 'กำลังตรวจสอบกล้อง...');
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          stream.getTracks().forEach(t => t.stop()); // ได้แล้ว หยุดก่อน
+          stream.getTracks().forEach(t => t.stop());
         } catch (camErr) {
           throw new Error(`❌ กล้อง: ${camErr.message}\n\nวิธีแก้: กด Allow กล้องใน browser แล้ว refresh`);
         }
 
-        // Step 2: โหลด MediaPipe
+        setInitProgress(25, 'กำลังโหลด FaceMesh...');
         try {
           await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js');
+          setInitProgress(45, 'กำลังโหลด Camera Utils...');
           await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js');
-        } catch (scriptErr) {
+        } catch (_) {
           throw new Error('❌ โหลด MediaPipe ไม่ได้: เช็ค internet หรือ CDN ถูก block');
         }
+
+        setInitProgress(60, 'กำลังโหลด Hands...');
+        try {
+          await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js');
+        } catch (_) {
+          if (!isUnmounted) {
+            setHandWarning('ไม่สามารถโหลด Hand overlay ได้ ระบบใบหน้ายังใช้งานได้ปกติ');
+          }
+        }
+
         if (!window.FaceMesh || !window.Camera) throw new Error('❌ MediaPipe โหลดไม่สมบูรณ์ ลอง refresh');
 
         const videoEl = videoRef.current;
@@ -198,66 +312,135 @@ export default function App() {
         const offCanvas = offscreenCanvasRef.current;
         const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
 
-        faceMesh = new window.FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+        setInitProgress(70, 'กำลังตั้งค่าโมเดล...');
+        faceMesh = new window.FaceMesh({ locateFile: resolveMediaPipeAsset });
         faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+
+        if (window.Hands) {
+          hands = new window.Hands({ locateFile: resolveHandsAsset });
+          hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+          hands.onResults((results) => {
+            latestHandsRef.current = {
+              multiHandLandmarks: results.multiHandLandmarks || [],
+              multiHandedness: results.multiHandedness || [],
+            };
+          });
+          handModelReadyRef.current = true;
+        } else {
+          handModelReadyRef.current = false;
+          latestHandsRef.current = { multiHandLandmarks: [], multiHandedness: [] };
+          if (!isUnmounted) {
+            setHandWarning('Hand overlay ไม่พร้อมใช้งานในอุปกรณ์นี้');
+          }
+        }
 
         faceMesh.onResults(results => {
           if (isUnmounted || !canvasRef.current) return;
-          const W = canvasEl.width, H = canvasEl.height;
-          if (offCanvas.width !== W) { offCanvas.width = W; offCanvas.height = H; }
+          const W = canvasEl.width;
+          const H = canvasEl.height;
+          if (offCanvas.width !== W) {
+            offCanvas.width = W;
+            offCanvas.height = H;
+          }
 
-          ctx.save(); ctx.clearRect(0, 0, W, H); ctx.drawImage(results.image, 0, 0, W, H); ctx.restore();
+          ctx.save();
+          ctx.clearRect(0, 0, W, H);
+          ctx.drawImage(results.image, 0, 0, W, H);
+          ctx.restore();
 
           const filterOn = isFilterEnabledRef.current;
           const meshOn = isMeshEnabledRef.current;
-          if (!filterOn && !meshOn) return;
-          if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) return;
+          const handOn = isHandEnabledRef.current && handModelReadyRef.current;
+          if (!filterOn && !meshOn && !handOn) return;
 
-          const landmarks = results.multiFaceLandmarks[0];
-          const fid = selectedFilterIdRef.current;
-          const cfg = filterConfigsRef.current[fid] || FILTER_PRESETS[0].defaultConfig;
-          const ovalPoints = getExpandedOvalPoints(landmarks, faceOvalIndices, W, H, cfg.faceScale, cfg.foreheadScale);
+          const landmarks = results.multiFaceLandmarks?.[0];
+          const hasFace = !!landmarks;
 
-          if (filterOn) {
-            offCtx.save();
-            offCtx.clearRect(0, 0, W, H);
-            offCtx.filter = `brightness(${cfg.brightness}) contrast(${cfg.contrast}) saturate(${cfg.saturation}) blur(${cfg.blur}px) hue-rotate(${cfg.hueRotate}deg)`;
-            offCtx.drawImage(results.image, 0, 0, W, H);
-            offCtx.filter = 'none';
-            offCtx.globalCompositeOperation = 'destination-in';
-            offCtx.beginPath();
-            ovalPoints.forEach((p, i) => i === 0 ? offCtx.moveTo(p.x, p.y) : offCtx.lineTo(p.x, p.y));
-            offCtx.closePath();
-            offCtx.filter = `blur(${cfg.maskFeather}px)`;
-            offCtx.fillStyle = 'white';
-            offCtx.fill();
-            offCtx.restore();
-            ctx.drawImage(offCanvas, 0, 0);
+          if (hasFace) {
+            const fid = selectedFilterIdRef.current;
+            const cfg = filterConfigsRef.current[fid] || FILTER_PRESETS[0].defaultConfig;
+            const ovalPoints = getExpandedOvalPoints(landmarks, faceOvalIndices, W, H, cfg.faceScale, cfg.foreheadScale);
+
+            if (filterOn) {
+              offCtx.save();
+              offCtx.clearRect(0, 0, W, H);
+              offCtx.filter = `brightness(${cfg.brightness}) contrast(${cfg.contrast}) saturate(${cfg.saturation}) blur(${cfg.blur}px) hue-rotate(${cfg.hueRotate}deg)`;
+              offCtx.drawImage(results.image, 0, 0, W, H);
+              offCtx.filter = 'none';
+              offCtx.globalCompositeOperation = 'destination-in';
+              offCtx.beginPath();
+              ovalPoints.forEach((p, i) => i === 0 ? offCtx.moveTo(p.x, p.y) : offCtx.lineTo(p.x, p.y));
+              offCtx.closePath();
+              offCtx.filter = `blur(${cfg.maskFeather}px)`;
+              offCtx.fillStyle = 'white';
+              offCtx.fill();
+              offCtx.restore();
+              ctx.drawImage(offCanvas, 0, 0);
+            }
+
+            if (meshOn) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.lineWidth = 2;
+              ctx.strokeStyle = 'rgba(0,255,255,0.8)';
+              ovalPoints.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+              ctx.closePath();
+              ctx.stroke();
+              ctx.restore();
+            }
           }
 
-          if (meshOn) {
-            ctx.save();
-            ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,255,255,0.8)';
-            ovalPoints.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-            ctx.closePath(); ctx.stroke(); ctx.restore();
+          if (handOn) {
+            drawHandOverlay(ctx, latestHandsRef.current, W, H);
           }
         });
 
+        setInitProgress(85, 'กำลังเริ่มกล้อง...');
         camera = new window.Camera(videoEl, {
-          onFrame: async () => { if (!isUnmounted && faceMesh) await faceMesh.send({ image: videoEl }); },
-          width: 1280, height: 720,
+          onFrame: async () => {
+            if (isUnmounted) return;
+            if (faceMesh) {
+              try {
+                await faceMesh.send({ image: videoEl });
+              } catch (faceErr) {
+                console.error('FaceMesh frame error:', faceErr);
+              }
+            }
+            if (hands && handModelReadyRef.current) {
+              try {
+                await hands.send({ image: videoEl });
+              } catch (handErr) {
+                console.error('Hands frame error:', handErr);
+              }
+            }
+          },
+          width: 1280,
+          height: 720,
         });
+
         await camera.start();
-        if (!isUnmounted) setIsModelLoaded(true);
+        if (!isUnmounted) {
+          setInitProgress(100, 'พร้อมใช้งาน');
+          setIsModelLoaded(true);
+          setIsInitializing(false);
+        }
       } catch (err) {
         console.error(err);
-        if (!isUnmounted) setCameraError(err.message || 'ไม่สามารถเข้าถึงกล้อง หรือโหลดโมเดลได้');
+        if (!isUnmounted) {
+          setCameraError(err.message || 'ไม่สามารถเข้าถึงกล้อง หรือโหลดโมเดลได้');
+          setIsInitializing(false);
+        }
       }
     };
 
     init();
-    return () => { isUnmounted = true; if (camera) camera.stop(); if (faceMesh) faceMesh.close(); };
-  }, []);
+    return () => {
+      isUnmounted = true;
+      if (camera) camera.stop();
+      if (faceMesh) faceMesh.close();
+      if (hands) hands.close();
+    };
+  }, [setInitProgress]);
 
   const takePhoto = () => {
     if (canvasRef.current) setCapturedImage(canvasRef.current.toDataURL('image/jpeg', 0.95));
@@ -268,7 +451,9 @@ export default function App() {
     const a = document.createElement('a');
     a.href = capturedImage;
     a.download = `glowface-${selectedFilterId}-${Date.now()}.jpg`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const currentConfig = filterConfigs[selectedFilterId] || {};
@@ -278,14 +463,20 @@ export default function App() {
     page: { minHeight: '100vh', backgroundColor: '#0f0f0f', color: '#fff', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column', alignItems: 'stretch', padding: '32px 16px' },
     card: { background: '#111827', border: '1px solid #1f2937', borderRadius: 16 },
     btn: (active, activeColor) => ({
-      width: 44, height: 44, borderRadius: '50%',
+      width: 44,
+      height: 44,
+      borderRadius: '50%',
       border: active ? `1px solid ${activeColor}40` : '1px solid #374151',
       background: active ? `${activeColor}20` : 'rgba(31,41,55,0.7)',
       color: active ? activeColor : '#9ca3af',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
       cursor: 'pointer',
     }),
   };
+
+  const isHandAvailable = !handWarning && handModelReadyRef.current;
 
   return (
     <div style={s.page}>
@@ -298,7 +489,7 @@ export default function App() {
       `}</style>
 
       {/* Header */}
-      <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, background: 'linear-gradient(to right,#ec4899,#8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             GlowFace AI
@@ -312,6 +503,12 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {handWarning && isModelLoaded && (
+        <p style={{ margin: '0 0 16px', padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(251,191,36,0.35)', background: 'rgba(245,158,11,0.12)', color: '#fcd34d', fontSize: 12 }}>
+          {handWarning}
+        </p>
+      )}
 
       <div
         className="gf-workspace"
@@ -327,10 +524,14 @@ export default function App() {
         <div style={{ minWidth: 0 }}>
           {/* Camera Area */}
           <div style={{ position: 'relative', aspectRatio: '16/9', background: '#000', borderRadius: 16, overflow: 'hidden', border: '1px solid #1f2937', marginBottom: 16 }}>
-            {!isModelLoaded && !cameraError && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.88)', zIndex: 20 }}>
-                <div style={{ width: 48, height: 48, border: '2px solid transparent', borderTopColor: '#ec4899', borderBottomColor: '#ec4899', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: 12 }} />
-                <p style={{ color: '#9ca3af', fontSize: 14, margin: 0 }}>กำลังเตรียมระบบ AI...</p>
+            {isInitializing && !cameraError && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.88)', zIndex: 20, gap: 10, padding: 24 }}>
+                <div style={{ width: 48, height: 48, border: '2px solid transparent', borderTopColor: '#ec4899', borderBottomColor: '#ec4899', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                <p style={{ color: '#d1d5db', fontSize: 14, margin: 0 }}>{loadingStage}</p>
+                <p style={{ color: '#9ca3af', fontSize: 13, margin: 0 }}>{loadingProgress}%</p>
+                <div style={{ width: 'min(320px, 80%)', height: 8, background: '#1f2937', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ width: `${loadingProgress}%`, height: '100%', background: 'linear-gradient(to right,#ec4899,#22d3ee)', transition: 'width 220ms ease' }} />
+                </div>
               </div>
             )}
             {cameraError && (
@@ -352,8 +553,15 @@ export default function App() {
                 </button>
                 <button onClick={() => setIsFilterEnabled(v => !v)} style={s.btn(isFilterEnabled, '#34d399')} title="Filter">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
+                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" />
                   </svg>
+                </button>
+                <button
+                  onClick={() => setIsHandEnabled(v => !v)}
+                  style={{ ...s.btn(isHandEnabled, '#f59e0b'), opacity: isHandAvailable ? 1 : 0.45, pointerEvents: isHandAvailable ? 'auto' : 'none' }}
+                  title="Hands"
+                >
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>H</span>
                 </button>
                 <button onClick={takePhoto} style={{ width: 64, height: 64, borderRadius: '50%', background: '#fff', border: '4px solid #e5e7eb', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 8px', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
                   <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6' }} />
@@ -361,7 +569,6 @@ export default function App() {
                 <button onClick={() => setShowAdjustPanel(v => !v)} style={s.btn(showAdjustPanel, '#ec4899')} title="ปรับแต่ง">
                   <Sliders size={18} />
                 </button>
-                <div style={{ width: 44 }} />
               </div>
             )}
           </div>
