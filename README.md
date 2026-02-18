@@ -1,5 +1,9 @@
 # GlowFace AI
 
+<p align="center">
+  <img src="./public/favicon.svg" alt="GlowFace AI icon" width="88" height="88" />
+</p>
+
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
