@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GlowFace AI">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffe7a8" />
+      <stop offset="55%" stop-color="#ffb45f" />
+      <stop offset="100%" stop-color="#ff6b4a" />
+    </radialGradient>
+    <linearGradient id="face" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fffdf8" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#ffe9cf" stop-opacity="0.92" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)" />
+  <circle cx="32" cy="30" r="17" fill="url(#face)" />
+  <circle cx="26" cy="28" r="2.2" fill="#422f22" />
+  <circle cx="38" cy="28" r="2.2" fill="#422f22" />
+  <path d="M25 36c2.6 3 11.4 3 14 0" fill="none" stroke="#7f4b2f" stroke-width="2" stroke-linecap="round" />
+  <path d="M14 24c2-2.7 4.1-4.8 6.6-6.6" stroke="#fff6e9" stroke-width="2" stroke-linecap="round" opacity="0.85" />
+  <path d="M49.5 20.5c1.8 1.7 3.3 3.7 4.6 6" stroke="#fff6e9" stroke-width="2" stroke-linecap="round" opacity="0.85" />
+  <circle cx="19" cy="45" r="2" fill="#fff7ea" opacity="0.85" />
+  <circle cx="45" cy="44" r="2.4" fill="#fff7ea" opacity="0.9" />
+  <circle cx="41" cy="50" r="1.5" fill="#fff7ea" opacity="0.7" />
+</svg>

@@ -1,0 +1,15 @@
+{
+  "name": "GlowFace AI",
+  "short_name": "GlowFace",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "theme_color": "#ff6b4a",
+  "background_color": "#ffffff",
+  "display": "standalone"
+}
