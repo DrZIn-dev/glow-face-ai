@@ -1,73 +1,124 @@
 # GlowFace AI
 
-GlowFace AI is a React + Vite web app for experimenting with real-time face glow filters using your browser camera.
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![License](https://img.shields.io/badge/License-Add%20LICENSE%20file-orange)](#license)
 
-## Features
+GlowFace AI is a browser-based real-time beauty filter app built with React + Vite.
+It applies face glow effects from your webcam stream and can optionally render MediaPipe hand landmarks.
 
-- Real-time camera preview with glow-style face effects
-- Optional MediaPipe hand landmark overlay (up to 2 hands)
-- Stage-based loading UI with loading percent during camera/model initialization
-- Filter presets and slider-based adjustments
+## Why this project
+
+- Fast, local-first webcam processing in the browser
+- Lightweight codebase with a single main feature module
+- Practical baseline for AR filter experiments with MediaPipe
+
+## Highlights
+
+- Real-time glow face filter on live camera feed
+- Preset-based style switching + per-preset fine tuning
+- Stage-based startup loader with progress percentage
+- Optional hand landmark overlay (up to 2 hands)
 - Capture and download processed snapshots
-- Lightweight TypeScript + React codebase
+- JSON export/import for filter config sharing
 
-## Tech stack
+## Tech Stack
 
 - React 18
 - TypeScript
 - Vite
+- MediaPipe FaceMesh + Hands (loaded from CDN)
 
-## Getting started
+## Quick Start
 
 ### Prerequisites
 
 - Node.js 18+
-- pnpm (recommended)
+- pnpm
 
-### Install and run
+### Install
 
 ```bash
 pnpm install
+```
+
+### Run dev server
+
+```bash
 pnpm dev
 ```
 
-Open the local URL shown in terminal (usually `http://localhost:5173`) and allow camera access.
+Open the URL printed in terminal (usually `http://localhost:5173`) and allow camera access.
 
-Note: the app loads MediaPipe scripts from jsDelivr CDN at runtime, so internet access is required.
-
-## Scripts
+### Production build
 
 ```bash
-pnpm dev      # start local dev server
-pnpm build    # type-check and create production build
-pnpm preview  # preview production build locally
+pnpm build
+pnpm preview
 ```
 
-## Project structure
+## Controls
 
-- `src/features/glow-face/GlowFaceApp.tsx`: core feature implementation
+- `Mesh`: show/hide face oval guide
+- `Filter`: enable/disable glow filter
+- `H`: enable/disable hand landmark overlay
+- Shutter button: capture current frame
+- Sliders panel: tune filter parameters
+
+## Performance Benchmark (Dev)
+
+The app includes a dev-only benchmark panel to measure runtime camera performance.
+
+1. Run `pnpm dev`
+2. Open `Perf Benchmark (DEV)` panel
+3. Click `Start`, run your scenario for 20-60 seconds, then click `Stop`
+4. Use `Copy JSON` to export metrics
+
+Reported metrics:
+
+- Current FPS and average FPS
+- P95 frame time
+- Average FaceMesh and Hands processing latency
+- Dropped frame ratio
+- Pass/fail status against desktop target (30 FPS)
+
+## Project Structure
+
+- `src/features/glow-face/GlowFaceApp.tsx`: main camera/model/render/UI logic
 - `src/App.tsx`: app wrapper
-- `src/main.tsx`: entry point
+- `src/main.tsx`: application entrypoint
 
-## Manual QA checklist
+## Browser Support
 
-- Camera permission prompt and denied state
-- Staged loading UI displays stage text and loading percent
-- Filter preset switching
-- Slider updates and reset behavior
-- Hand toggle and hand landmark overlay visibility
-- Capture + download flow
-- Browser check in Chrome + one additional browser
+Primary target is desktop Chrome. Also test at least one additional browser for camera + model loading behavior.
 
-## Open source notes
+## Troubleshooting
 
-Contributions are welcome. Please open an issue for major feature changes before starting implementation.
+- `tsc: command not found` during build:
+  - Run `pnpm install` to install local dependencies.
+- MediaPipe wasm/data load errors or 404s:
+  - Hard refresh and retry.
+  - Confirm network access to `cdn.jsdelivr.net`.
+- `Hand overlay ไม่พร้อมใช้งานในอุปกรณ์นี้`:
+  - Hands model failed to initialize; face filter still works.
 
-1. Create a feature branch.
-2. Keep commits focused and descriptive.
-3. Submit a pull request with screenshots or a short recording for UI changes.
-4. Include manual verification steps in the PR description.
+## Contributing
+
+Contributions are welcome.
+
+1. Open an issue for major changes.
+2. Create a feature branch.
+3. Keep commits focused and descriptive.
+4. Submit a PR with manual test steps and UI screenshots/recording when relevant.
+
+## Roadmap
+
+- Better gesture interactions (hands-free capture/toggle)
+- More filter packs and export presets
+- Performance tuning for low-power devices
 
 ## License
 
-No license file is included yet. Add a `LICENSE` file (for example MIT) before publishing this repository publicly.
+No license file is currently included.
+Add a `LICENSE` file (for example MIT) before publishing publicly.
